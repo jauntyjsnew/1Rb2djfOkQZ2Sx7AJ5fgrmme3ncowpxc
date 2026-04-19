@@ -638,6 +638,21 @@ jobs:
           
           echo "✅ App display name set to: $APP_NAME"
       
+      - name: Fix Info.plist for Mac Catalyst
+        if: inputs.target_platform == 'all_devices' || inputs.target_platform == 'macos_only'
+        working-directory: app/ios/App
+        run: |
+          echo "🔧 Fixing Info.plist for Mac Catalyst compatibility..."
+          
+          # macOS requires LSSupportsOpeningDocumentsInPlace to be YES or absent
+          /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" App/Info.plist 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" App/Info.plist 2>/dev/null || true
+          
+          # Also set UIFileSharingEnabled to YES for document access
+          /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" App/Info.plist 2>/dev/null || true
+          
+          echo "✅ Info.plist fixed for Mac Catalyst"
+      
       - name: Configure Mac Catalyst Entitlements
         if: inputs.target_platform == 'all_devices' || inputs.target_platform == 'macos_only'
         working-directory: app/ios/App
