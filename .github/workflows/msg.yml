@@ -416,39 +416,39 @@ jobs:
             exit 0
           fi
           
-          # Create a comprehensive post_install hook for Mac Catalyst
-          # Key: Disable code signing for Pods + exclude incompatible pods from Catalyst
-          echo 'post_install do |installer|' > catalyst_post_install.rb
-          echo '  catalyst_unsupported = ["IONFilesystemLib", "CapacitorFilesystem", "Google-Mobile-Ads-SDK", "GoogleUserMessagingPlatform", "CapacitorCommunityAdmob"]' >> catalyst_post_install.rb
-          echo '  installer.pods_project.targets.each do |target|' >> catalyst_post_install.rb
-          echo '    target.build_configurations.each do |config|' >> catalyst_post_install.rb
-          echo '      config.build_settings["SUPPORTS_MACCATALYST"] = "YES"' >> catalyst_post_install.rb
-          echo '      config.build_settings["CODE_SIGN_IDENTITY"] = ""' >> catalyst_post_install.rb
-          echo '      config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"' >> catalyst_post_install.rb
-          echo '      config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"' >> catalyst_post_install.rb
-          echo '      if catalyst_unsupported.include?(target.name)' >> catalyst_post_install.rb
-          echo '        config.build_settings["EXCLUDED_ARCHS[sdk=maccatalyst*]"] = "arm64 x86_64"' >> catalyst_post_install.rb
-          echo '      end' >> catalyst_post_install.rb
-          echo '    end' >> catalyst_post_install.rb
-          echo '  end' >> catalyst_post_install.rb
-          echo 'end' >> catalyst_post_install.rb
+          # Physically remove pods incompatible with Mac Catalyst from Podfile
+          # EXCLUDED_ARCHS alone is NOT enough - Swift compiler still resolves imports
+          echo "🗑️ Removing Mac Catalyst incompatible pods from Podfile..."
+          sed -i.bak '/IONFilesystemLib/d' Podfile
+          sed -i.bak '/CapacitorFilesystem/d' Podfile
+          sed -i.bak '/Google-Mobile-Ads-SDK/d' Podfile
+          sed -i.bak '/GoogleUserMessagingPlatform/d' Podfile
+          sed -i.bak '/CapacitorCommunityAdmob/d' Podfile
+          rm -f Podfile.bak
+          echo "  ✅ Removed incompatible pod lines"
           
           # Check if post_install already exists - if so, remove it
           if grep -q "post_install" Podfile; then
             echo "📝 Existing post_install found, removing it..."
-            # Use sed to remove the post_install block (from 'post_install' to matching 'end')
             sed -i.bak '/^post_install/,/^end$/d' Podfile
             rm -f Podfile.bak
           fi
           
-          # Append our post_install hook
-          echo "" >> Podfile
-          cat catalyst_post_install.rb >> Podfile
-          rm catalyst_post_install.rb
+          # Add clean post_install for code signing and catalyst support
+          echo '' >> Podfile
+          echo 'post_install do |installer|' >> Podfile
+          echo '  installer.pods_project.targets.each do |target|' >> Podfile
+          echo '    target.build_configurations.each do |config|' >> Podfile
+          echo '      config.build_settings["SUPPORTS_MACCATALYST"] = "YES"' >> Podfile
+          echo '      config.build_settings["CODE_SIGN_IDENTITY"] = ""' >> Podfile
+          echo '      config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"' >> Podfile
+          echo '      config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"' >> Podfile
+          echo '    end' >> Podfile
+          echo '  end' >> Podfile
+          echo 'end' >> Podfile
           
-          echo "✅ Added Mac Catalyst configuration with code signing fix to Podfile"
-          echo "📄 Current Podfile post_install:"
-          grep -A 15 "post_install" Podfile || true
+          echo "📄 Final Podfile:"
+          cat Podfile
           
           echo "🔄 Running pod install..."
           pod install
