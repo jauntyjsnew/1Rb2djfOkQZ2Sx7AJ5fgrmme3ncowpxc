@@ -126,13 +126,8 @@ jobs:
           
       - name: Setup Working Directory
         run: |
-          if [ "${{ inputs.target_platform }}" == "macos_only" ]; then
-            echo "Using mac standalone codebase..."
-            mv app_temp/mac app
-          else
-            echo "Using main iOS codebase..."
-            mv app_temp app
-          fi
+          echo "Using unified codebase for all platforms..."
+          mv app_temp app
       
       - name: Read Capacitor Config
         id: capacitor
