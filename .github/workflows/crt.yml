@@ -1,4 +1,4 @@
-name: CRT Viewer WORKFLOW
+name: CRT WORKFLOW
 
 on:
   workflow_dispatch:
@@ -126,13 +126,8 @@ jobs:
           
       - name: Setup Working Directory
         run: |
-          if [ "${{ inputs.target_platform }}" == "macos_only" ]; then
-            echo "Using mac standalone codebase..."
-            mv app_temp/mac app
-          else
-            echo "Using main iOS codebase..."
-            mv app_temp app
-          fi
+          echo "Using unified codebase for all platforms..."
+          mv app_temp app
       
       - name: Read Capacitor Config
         id: capacitor
@@ -421,36 +416,39 @@ jobs:
             exit 0
           fi
           
-          # Create a comprehensive post_install hook for Mac Catalyst
-          # Key: Disable code signing for Pods (they get embedded into the app which handles signing)
-          echo '# Mac Catalyst Support and Code Signing Fix for CI/CD' > catalyst_post_install.rb
-          echo 'post_install do |installer|' >> catalyst_post_install.rb
-          echo '  installer.pods_project.targets.each do |target|' >> catalyst_post_install.rb
-          echo '    target.build_configurations.each do |config|' >> catalyst_post_install.rb
-          echo '      config.build_settings["SUPPORTS_MACCATALYST"] = "YES"' >> catalyst_post_install.rb
-          echo '      config.build_settings["CODE_SIGN_IDENTITY"] = ""' >> catalyst_post_install.rb
-          echo '      config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"' >> catalyst_post_install.rb
-          echo '      config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"' >> catalyst_post_install.rb
-          echo '    end' >> catalyst_post_install.rb
-          echo '  end' >> catalyst_post_install.rb
-          echo 'end' >> catalyst_post_install.rb
+          # Physically remove pods incompatible with Mac Catalyst from Podfile
+          # EXCLUDED_ARCHS alone is NOT enough - Swift compiler still resolves imports
+          echo "🗑️ Removing Mac Catalyst incompatible pods from Podfile..."
+          sed -i.bak '/IONFilesystemLib/d' Podfile
+          sed -i.bak '/CapacitorFilesystem/d' Podfile
+          sed -i.bak '/Google-Mobile-Ads-SDK/d' Podfile
+          sed -i.bak '/GoogleUserMessagingPlatform/d' Podfile
+          sed -i.bak '/CapacitorCommunityAdmob/d' Podfile
+          rm -f Podfile.bak
+          echo "  ✅ Removed incompatible pod lines"
           
           # Check if post_install already exists - if so, remove it
           if grep -q "post_install" Podfile; then
             echo "📝 Existing post_install found, removing it..."
-            # Use sed to remove the post_install block (from 'post_install' to matching 'end')
             sed -i.bak '/^post_install/,/^end$/d' Podfile
             rm -f Podfile.bak
           fi
           
-          # Append our post_install hook
-          echo "" >> Podfile
-          cat catalyst_post_install.rb >> Podfile
-          rm catalyst_post_install.rb
+          # Add clean post_install for code signing and catalyst support
+          echo '' >> Podfile
+          echo 'post_install do |installer|' >> Podfile
+          echo '  installer.pods_project.targets.each do |target|' >> Podfile
+          echo '    target.build_configurations.each do |config|' >> Podfile
+          echo '      config.build_settings["SUPPORTS_MACCATALYST"] = "YES"' >> Podfile
+          echo '      config.build_settings["CODE_SIGN_IDENTITY"] = ""' >> Podfile
+          echo '      config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"' >> Podfile
+          echo '      config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"' >> Podfile
+          echo '    end' >> Podfile
+          echo '  end' >> Podfile
+          echo 'end' >> Podfile
           
-          echo "✅ Added Mac Catalyst configuration with code signing fix to Podfile"
-          echo "📄 Current Podfile post_install:"
-          grep -A 15 "post_install" Podfile || true
+          echo "📄 Final Podfile:"
+          cat Podfile
           
           echo "🔄 Running pod install..."
           pod install
@@ -640,6 +638,21 @@ jobs:
           
           echo "✅ App display name set to: $APP_NAME"
       
+      - name: Fix Info.plist for Mac Catalyst
+        if: inputs.target_platform == 'all_devices' || inputs.target_platform == 'macos_only'
+        working-directory: app/ios/App
+        run: |
+          echo "🔧 Fixing Info.plist for Mac Catalyst compatibility..."
+          
+          # macOS requires LSSupportsOpeningDocumentsInPlace to be YES or absent
+          /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" App/Info.plist 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" App/Info.plist 2>/dev/null || true
+          
+          # Also set UIFileSharingEnabled to YES for document access
+          /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" App/Info.plist 2>/dev/null || true
+          
+          echo "✅ Info.plist fixed for Mac Catalyst"
+      
       - name: Configure Mac Catalyst Entitlements
         if: inputs.target_platform == 'all_devices' || inputs.target_platform == 'macos_only'
         working-directory: app/ios/App
@@ -767,7 +780,6 @@ jobs:
         working-directory: app/ios/App
         env:
           PROFILE_UUID: ${{ steps.provision.outputs.uuid }}
-          MAC_PROFILE_UUID: ${{ steps.mac_provision.outputs.uuid }}
         run: |
           echo "🔧 Disabling Automatic Signing for App Store build..."
           echo "require 'xcodeproj'" > disable_signing.rb
@@ -775,18 +787,10 @@ jobs:
           echo "target = project.targets.find { |t| t.name == 'App' }" >> disable_signing.rb
           echo "target.build_configurations.each do |config|" >> disable_signing.rb
           echo "  config.build_settings['CODE_SIGN_STYLE'] = 'Manual'" >> disable_signing.rb
-          
-          echo "  uuid = nil" >> disable_signing.rb
-          echo "  if ENV['PROFILE_UUID'] && !ENV['PROFILE_UUID'].empty?" >> disable_signing.rb
-          echo "    uuid = ENV['PROFILE_UUID']" >> disable_signing.rb
-          echo "  elsif ENV['MAC_PROFILE_UUID'] && !ENV['MAC_PROFILE_UUID'].empty?" >> disable_signing.rb
-          echo "    uuid = ENV['MAC_PROFILE_UUID']" >> disable_signing.rb
-          echo "  end" >> disable_signing.rb
-          
-          echo "  if uuid" >> disable_signing.rb
-          echo "    config.build_settings['PROVISIONING_PROFILE'] = uuid" >> disable_signing.rb
+          echo "  if ENV['PROFILE_UUID']" >> disable_signing.rb
+          echo "    config.build_settings['PROVISIONING_PROFILE'] = ENV['PROFILE_UUID']" >> disable_signing.rb
           echo "    config.build_settings['PROVISIONING_PROFILE_SPECIFIER'] = ''" >> disable_signing.rb
-          echo "    puts \"  - Set Provisioning Profile: #{uuid}\"" >> disable_signing.rb
+          echo "    puts \"  - Set Provisioning Profile: #{ENV['PROFILE_UUID']}\"" >> disable_signing.rb
           echo "  end" >> disable_signing.rb
           echo "  puts \"Disabled automatic signing for configuration: #{config.name}\"" >> disable_signing.rb
           echo "end" >> disable_signing.rb
