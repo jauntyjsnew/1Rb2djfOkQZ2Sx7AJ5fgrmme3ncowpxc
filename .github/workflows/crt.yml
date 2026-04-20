@@ -418,6 +418,7 @@ jobs:
           
           # Create a comprehensive post_install hook for Mac Catalyst
           # Key: Disable code signing for Pods (they get embedded into the app which handles signing)
+          # Also: Exclude CapacitorFilesystem from Mac Catalyst (IONFilesystemLib has no maccatalyst slice)
           echo '# Mac Catalyst Support and Code Signing Fix for CI/CD' > catalyst_post_install.rb
           echo 'post_install do |installer|' >> catalyst_post_install.rb
           echo '  installer.pods_project.targets.each do |target|' >> catalyst_post_install.rb
@@ -426,6 +427,12 @@ jobs:
           echo '      config.build_settings["CODE_SIGN_IDENTITY"] = ""' >> catalyst_post_install.rb
           echo '      config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"' >> catalyst_post_install.rb
           echo '      config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"' >> catalyst_post_install.rb
+          echo '      # IONFilesystemLib XCFramework does not have a maccatalyst slice.' >> catalyst_post_install.rb
+          echo '      # Exclude CapacitorFilesystem and IONFilesystemLib from Mac Catalyst builds.' >> catalyst_post_install.rb
+          echo '      if ["CapacitorFilesystem", "IONFilesystemLib"].include?(target.name)' >> catalyst_post_install.rb
+          echo '        config.build_settings["EXCLUDED_ARCHS[sdk=macosx*]"] = "arm64 x86_64"' >> catalyst_post_install.rb
+          echo '        config.build_settings["SUPPORTS_MACCATALYST"] = "NO"' >> catalyst_post_install.rb
+          echo '      end' >> catalyst_post_install.rb
           echo '    end' >> catalyst_post_install.rb
           echo '  end' >> catalyst_post_install.rb
           echo 'end' >> catalyst_post_install.rb
