@@ -13,7 +13,7 @@ on:
         description: 'Branch to build'
         required: false
         type: string
-        default: 'master'
+        default: 'main'
       
       is_private_repo:
         description: 'Is repository private?'
